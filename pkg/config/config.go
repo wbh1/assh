@@ -9,6 +9,7 @@ import (
 	"os"
 	"path"
 	"path/filepath"
+	"regexp"
 	"sort"
 	"strings"
 	"time"
@@ -197,15 +198,22 @@ func computeHost(host *Host, config *Config, name string, fullCompute bool) (*Ho
 		// i.e: %h.some.zone -> {name}.some.zone
 		hostname := strings.ReplaceAll(computedHost.HostName, "%h", "%n")
 
-		// ssh resolve '%h' in hostnames
-		// -> we bypass the string expansion if the input matches
-		//    an already resolved hostname
-		// See https://github.com/moul/assh/issues/103
-		pattern := strings.ReplaceAll(hostname, "%n", "*")
-		if match, _ := path.Match(pattern, computedHost.inputName); match {
+		if computedHost.ShouldUseRegex() && computedHost.regex.MatchString(computedHost.inputName) {
 			computedHost.HostName = computedHost.inputName
+			if computedHost.RegexExpansion != "" {
+				computedHost.HostName = computedHost.ExpandString(hostname, "")
+			}
 		} else {
-			computedHost.HostName = computedHost.ExpandString(hostname, "")
+			// ssh resolve '%h' in hostnames
+			// -> we bypass the string expansion if the input matches
+			//    an already resolved hostname
+			// See https://github.com/moul/assh/issues/103
+			pattern := strings.ReplaceAll(hostname, "%n", "*")
+			if match, _ := path.Match(pattern, computedHost.inputName); match {
+				computedHost.HostName = computedHost.inputName
+			} else {
+				computedHost.HostName = computedHost.ExpandString(hostname, "")
+			}
 		}
 	}
 
@@ -221,13 +229,20 @@ func (c *Config) getHostByName(name string, safe bool, compute bool, allowTempla
 	for origPattern, host := range c.Hosts {
 		patterns := append([]string{origPattern}, host.Aliases...)
 		for _, pattern := range patterns {
-			matched, err := path.Match(pattern, name)
-			if err != nil {
-				return nil, err
-			}
-			if matched {
-				logger().Debug("getHostByName pattern matching", zap.String("pattern", pattern), zap.String("name", name))
-				return computeHost(host, c, name, compute)
+			if host.ShouldUseRegex() {
+				if host.regex.MatchString(name) {
+					logger().Debug("getHostByName regex matching", zap.String("pattern", pattern), zap.String("name", name))
+					return computeHost(host, c, name, compute)
+				}
+			} else {
+				matched, err := path.Match(pattern, name)
+				if err != nil {
+					return nil, err
+				}
+				if matched {
+					logger().Debug("getHostByName pattern matching", zap.String("pattern", pattern), zap.String("name", name))
+					return computeHost(host, c, name, compute)
+				}
 			}
 		}
 	}
@@ -347,10 +362,17 @@ func (c *Config) needsARebuildForTarget(target string) bool {
 		}
 	}
 
+	// simple path matching patterns
 	patterns := []string{}
+	regexPatterns := []string{}
 	for origPattern, host := range c.Hosts {
-		patterns = append(patterns, origPattern)
-		patterns = append(patterns, host.Aliases...)
+		if host.ShouldUseRegex() {
+			regexPatterns = append(regexPatterns, origPattern)
+			regexPatterns = append(regexPatterns, host.Aliases...)
+		} else {
+			patterns = append(patterns, origPattern)
+			patterns = append(patterns, host.Aliases...)
+		}
 	}
 
 	for _, part := range parts {
@@ -367,6 +389,17 @@ func (c *Config) needsARebuildForTarget(target string) bool {
 		// check for pattern matching
 		for _, pattern := range patterns {
 			matched, err := path.Match(pattern, part)
+			if err != nil {
+				continue
+			}
+			if matched {
+				return true
+			}
+		}
+
+		// check for regex matching
+		for _, regex := range regexPatterns {
+			matched, err := regexp.MatchString(regex, part)
 			if err != nil {
 				continue
 			}

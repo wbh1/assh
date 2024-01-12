@@ -23,6 +23,9 @@ hosts:
     HostName: 1.3.5.7
   eee:
     ResolveCommand: /bin/sh -c "echo 42.42.42.42"
+  'r([0-9]+)':
+    use_regex: true
+    regex_expansion: regex-$1.example.com
 defaults:
   Port: 22
   User: root
@@ -59,6 +62,13 @@ func TestComputeHost(t *testing.T) {
 		So(err, ShouldBeNil)
 		So(host.HostName, ShouldEqual, "eee")
 		So(host.Port, ShouldEqual, "42")
+
+		err = config.LoadConfig(strings.NewReader(configExample))
+		So(err, ShouldBeNil)
+		host, err = computeHost("r123", 0, config)
+		So(err, ShouldBeNil)
+		So(host.HostName, ShouldEqual, "regex-123.example.com")
+		So(host.Port, ShouldEqual, "22")
 	})
 }
 

@@ -5,9 +5,11 @@ import (
 	"fmt"
 	"io"
 	"os/user"
+	"regexp"
 	"strings"
 
 	composeyaml "github.com/docker/libcompose/yaml"
+	"go.uber.org/zap"
 	"moul.io/assh/v2/pkg/utils"
 )
 
@@ -128,8 +130,12 @@ type Host struct {
 	Comment               composeyaml.Stringorslice `yaml:"comment,omitempty,flow" json:"Comment,omitempty"`
 	RateLimit             string                    `yaml:"ratelimit,omitempty,flow" json:"RateLimit,omitempty"`
 	GatewayConnectTimeout int                       `yaml:"gatewayconnecttimeout,omitempty,flow" json:"GatewayConnectTimeout,omitempty"`
+	UseRegex              bool                      `yaml:"use_regex,omitempty,flow" json:"UseRegex,omitempty"`
+	RegexExpansion        string                    `yaml:"regex_expansion,omitempty,flow" json:"RegexExpansion,omitempty"`
 
 	// private assh fields
+	regex              *regexp.Regexp
+	skipRegex          bool
 	noAutomaticRewrite bool
 	knownHosts         []string
 	pattern            string
@@ -187,7 +193,7 @@ func (h *Host) Prototype() string {
 
 	hostname := h.HostName
 	if hostname == "" {
-		if isDynamicHostname(h.name) {
+		if isDynamicHostname(h.name) || h.UseRegex {
 			hostname = "[dynamic]"
 		} else {
 			hostname = h.name
@@ -221,6 +227,10 @@ func (h *Host) Clone() *Host {
 func (h *Host) Matches(needle string) bool {
 	if matches := strings.Contains(h.Name(), needle); matches {
 		return true
+	} else if h.ShouldUseRegex() {
+		if h.regex.MatchString(needle) {
+			return true
+		}
 	}
 
 	for _, opt := range h.Options() {
@@ -229,6 +239,26 @@ func (h *Host) Matches(needle string) bool {
 		}
 	}
 	return false
+}
+
+// ShouldUseRegex returns whether or not regex should be used with this host
+func (h *Host) ShouldUseRegex() bool {
+	// If the regex hasn't been compiled yet, do it now
+	if h.UseRegex && !h.skipRegex && h.regex == nil {
+		re := h.name
+		if h.pattern != "" {
+			re = h.pattern
+		}
+		r, err := regexp.Compile(re)
+		if err != nil {
+			logger().Warn("Unable to compile regex. Skipping...", zap.String("regex", re))
+			h.skipRegex = true
+		} else {
+			h.regex = r
+		}
+
+	}
+	return h.UseRegex && !h.skipRegex
 }
 
 // Options returns a map of set options
@@ -1150,10 +1180,37 @@ func (h *Host) WriteSSHConfigTo(w io.Writer) error {
 	aliases := append([]string{h.Name()}, h.Aliases...)
 	aliases = append(aliases, h.knownHosts...)
 	aliasIdx := 0
+	skips := 0
+	if h.ShouldUseRegex() {
+		// If the name doesn't match the regex, we've already matched it and expanded it.
+		if h.Name() != h.regex.String() {
+			// It should be safe to write out, but we'll double check.
+			// If the full regex is just a literal string (i.e. after we've already matched), it's safe to keep in the config
+			r, err := regexp.Compile(h.Name())
+			if err == nil {
+				if _, complete := r.LiteralPrefix(); !complete {
+					logger().Debug("That shouldn't happen... Host regex seems to have been expanded but still uses regex for matching and will not be output to SSH config", zap.String("host", h.Name()))
+					aliasIdx += 1
+					skips += 1
+				}
+			}
+		} else {
+			logger().Debug("Host uses regex for matching and will not be output in your SSH config", zap.String("host", h.Name()))
+			aliasIdx += 1
+			skips += 1
+
+		}
+		if len(aliases)-1 < aliasIdx {
+			return nil
+		} else {
+			aliases = aliases[aliasIdx:]
+		}
+	}
+
 	for _, alias := range aliases {
 		// FIXME: skip complex patterns
 
-		if aliasIdx > 0 {
+		if (aliasIdx > 0 && skips == 0) || (skips > 0 && aliasIdx > skips) {
 			_, _ = fmt.Fprint(w, "\n")
 		}
 
@@ -1523,6 +1580,14 @@ func (h *Host) WriteSSHConfigTo(w io.Writer) error {
 // ExpandString replaces elements in a format string with host variables.
 func (h *Host) ExpandString(input string, gateway string) string {
 	output := input
+
+	if h.ShouldUseRegex() && h.RegexExpansion != "" {
+		res := []byte{}
+		for _, submatch := range h.regex.FindAllStringSubmatchIndex(input, -1) {
+			res = h.regex.ExpandString(res, h.RegexExpansion, input, submatch)
+		}
+		output = string(res)
+	}
 
 	// name of the host in config
 	output = strings.ReplaceAll(output, "%name", h.Name())

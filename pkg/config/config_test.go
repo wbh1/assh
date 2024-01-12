@@ -98,6 +98,10 @@ hosts:
     - ooo21
     - ooo22
 
+  "r(\\d+)":
+    use_regex: true
+    regex_expansion: regex-$1.example.com
+
 templates:
 
   kkk:
@@ -186,6 +190,10 @@ func dummyConfig() *Config {
 	config.Hosts["ooo2"] = &Host{
 		Port:    "24",
 		Aliases: []string{"ooo21", "ooo22"},
+	}
+	config.Hosts[`r(\d+)`] = &Host{
+		UseRegex:       true,
+		RegexExpansion: "regex-$1.example.com",
 	}
 	config.Hosts["toto[1-5]toto"] = &Host{
 		User: "toto1",
@@ -307,7 +315,7 @@ func TestConfig(t *testing.T) {
 	Convey("Testing dummyConfig", t, func() {
 		config := dummyConfig()
 
-		So(len(config.Hosts), ShouldEqual, 14)
+		So(len(config.Hosts), ShouldEqual, 15)
 
 		So(config.Hosts["toto"].HostName, ShouldEqual, "1.2.3.4")
 		So(config.Hosts["toto"].Port, ShouldEqual, "")
@@ -339,6 +347,9 @@ func TestConfig(t *testing.T) {
 		So(config.Hosts["empty"].isDefault, ShouldEqual, false)
 		So(config.Hosts["empty"].Port, ShouldEqual, "")
 
+		So(config.Hosts[`r(\d+)`].UseRegex, ShouldBeTrue)
+		So(config.Hosts[`r(\d+)`].RegexExpansion, ShouldEqual, "regex-$1.example.com")
+
 		So(len(config.Templates), ShouldEqual, 1)
 
 		So(config.Defaults.User, ShouldEqual, "root")
@@ -353,7 +364,7 @@ func TestConfig_LoadConfig(t *testing.T) {
 			config := New()
 			err := config.LoadConfig(strings.NewReader(yamlConfig))
 			So(err, ShouldBeNil)
-			So(len(config.Hosts), ShouldEqual, 17)
+			So(len(config.Hosts), ShouldEqual, 18)
 			So(config.Hosts["aaa"].HostName, ShouldEqual, "1.2.3.4")
 			So(config.Hosts["aaa"].Port, ShouldEqual, "")
 			So(config.Hosts["aaa"].User, ShouldEqual, "")
@@ -405,6 +416,10 @@ func TestConfig_JSONString(t *testing.T) {
         "ooo21",
         "ooo22"
       ]
+    },
+    "r(\\d+)": {
+      "UseRegex": true,
+      "RegexExpansion": "regex-$1.example.com"
     },
     "tata": {
       "Inherits": [
@@ -717,6 +732,10 @@ func TestConfig_JSONString(t *testing.T) {
         "ooo22"
       ]
     },
+    "r(\\d+)": {
+      "UseRegex": true,
+      "RegexExpansion": "regex-$1.example.com"
+    },
     "toto[1-5]toto": {
       "User": "toto1"
     },
@@ -751,7 +770,9 @@ func TestConfig_JSONString(t *testing.T) {
 }`
 			json, err := config.JSONString()
 			So(err, ShouldBeNil)
-			So(string(json), ShouldEqual, expected)
+			s := string(json)
+			So(s, ShouldEqual, expected)
+			// So(string(json), ShouldEqual, expected)
 		})
 	})
 }
@@ -939,8 +960,12 @@ func TestConfig_needsARebuildForTarget(t *testing.T) {
 		So(config.needsARebuildForTarget("toto9toto"), ShouldBeTrue)
 		So(config.needsARebuildForTarget("toto10toto"), ShouldBeFalse)
 
+		// Regex Match
+		So(config.needsARebuildForTarget("r123"), ShouldBeTrue)
+
 		config.addKnownHost("toto1toto")
 		config.addKnownHost("toto2toto")
+		config.addKnownHost("r123")
 
 		So(config.needsARebuildForTarget("totototo"), ShouldBeFalse)
 		So(config.needsARebuildForTarget("toto0toto"), ShouldBeFalse)
@@ -954,6 +979,8 @@ func TestConfig_needsARebuildForTarget(t *testing.T) {
 		So(config.needsARebuildForTarget("toto8toto"), ShouldBeTrue)
 		So(config.needsARebuildForTarget("toto9toto"), ShouldBeTrue)
 		So(config.needsARebuildForTarget("toto10toto"), ShouldBeFalse)
+
+		So(config.needsARebuildForTarget("r123"), ShouldBeFalse)
 	})
 }
 
@@ -974,7 +1001,7 @@ func TestConfig_LoadFiles(t *testing.T) {
 			So(config.IncludedFiles(), ShouldResemble, []string{file.Name()})
 			So(config.includedFiles[file.Name()], ShouldEqual, true)
 			So(len(config.includedFiles), ShouldEqual, 1)
-			So(len(config.Hosts), ShouldEqual, 17)
+			So(len(config.Hosts), ShouldEqual, 18)
 			So(config.Hosts["aaa"].HostName, ShouldEqual, "1.2.3.4")
 			So(config.Hosts["aaa"].Port, ShouldEqual, "")
 			So(config.Hosts["aaa"].User, ShouldEqual, "")
@@ -989,6 +1016,8 @@ func TestConfig_LoadFiles(t *testing.T) {
 			So(config.Hosts["*.ddd"].HostName, ShouldEqual, "1.3.5.7")
 			So(config.Hosts["*.ddd"].Port, ShouldEqual, "")
 			So(config.Hosts["*.ddd"].User, ShouldEqual, "")
+			So(config.Hosts[`r(\d+)`].UseRegex, ShouldBeTrue)
+			So(config.Hosts[`r(\d+)`].RegexExpansion, ShouldEqual, "regex-$1.example.com")
 			So(config.Defaults.Port, ShouldEqual, "22")
 			So(config.Defaults.User, ShouldEqual, "root")
 			So(len(config.Templates), ShouldEqual, 3)
@@ -1001,7 +1030,7 @@ func TestConfig_LoadFiles(t *testing.T) {
 			So(err, ShouldBeNil)
 			So(config.includedFiles[file.Name()], ShouldEqual, true)
 			So(len(config.includedFiles), ShouldEqual, 1)
-			So(len(config.Hosts), ShouldEqual, 17)
+			So(len(config.Hosts), ShouldEqual, 18)
 			So(config.Hosts["aaa"].HostName, ShouldEqual, "1.2.3.4")
 			So(config.Hosts["aaa"].Port, ShouldEqual, "")
 			So(config.Hosts["aaa"].User, ShouldEqual, "")
@@ -1016,6 +1045,8 @@ func TestConfig_LoadFiles(t *testing.T) {
 			So(config.Hosts["*.ddd"].HostName, ShouldEqual, "1.3.5.7")
 			So(config.Hosts["*.ddd"].Port, ShouldEqual, "")
 			So(config.Hosts["*.ddd"].User, ShouldEqual, "")
+			So(config.Hosts[`r(\d+)`].UseRegex, ShouldBeTrue)
+			So(config.Hosts[`r(\d+)`].RegexExpansion, ShouldEqual, "regex-$1.example.com")
 			So(config.Defaults.Port, ShouldEqual, "22")
 			So(config.Defaults.User, ShouldEqual, "root")
 			So(len(config.Templates), ShouldEqual, 3)
@@ -1288,7 +1319,7 @@ func TestConfig_GetHostSafe(t *testing.T) {
 func TestConfig_String(t *testing.T) {
 	Convey("Testing Config.String", t, func() {
 		config := dummyConfig()
-		So(config.String(), ShouldEqual, `{"hosts":{"*.ddd":{"PasswordAuthentication":"yes","HostName":"1.3.5.7"},"empty":{},"nnn":{"Port":"26","Inherits":["mmm"]},"ooo1":{"Port":"23","Aliases":["ooo11","ooo12"]},"ooo2":{"Port":"24","Aliases":["ooo21","ooo22"]},"tata":{"Inherits":["tutu","titi","toto","tutu"]},"titi":{"Port":"23","User":"moul","HostName":"tata","ProxyCommand":"nc -v 4242","ControlMasterMkdir":"true","Comment":["Hello World"]},"tonton":{"ResolveNameservers":["a.com","1.2.3.4"],"Comment":["AAA","BBB"]},"toto":{"HostName":"1.2.3.4"},"toto[1-5]toto":{"User":"toto1"},"toto[7-9]toto":{"User":"toto2"},"toutou":{"RemoteCommand":"date \u003e\u003e /tmp/logs","ResolveCommand":"dig -t %h","Comment":["First line Second line Third line\n"]},"tutu":{"Inherits":["toto","tutu","*.ddd"],"Gateways":["titi","direct","1.2.3.4"]},"zzz":{"AddressFamily":"any","AskPassGUI":"yes","BatchMode":"no","CanonicalDomains":"42.am","CanonicalizeFallbackLocal":"no","CanonicalizeHostname":"yes","CanonicalizeMaxDots":"1","CanonicalizePermittedCNAMEs":"*.a.example.com:*.b.example.com:*.c.example.com","ChallengeResponseAuthentication":"yes","CheckHostIP":"yes","Cipher":"blowfish","Ciphers":["aes128-ctr,aes192-ctr","aes256-ctr"],"ClearAllForwardings":"yes","Compression":"yes","CompressionLevel":6,"ConnectionAttempts":"1","ConnectTimeout":10,"ControlMaster":"yes","ControlPath":"/tmp/%L-%l-%n-%p-%u-%r-%C-%h","ControlPersist":"yes","DynamicForward":["0.0.0.0:4242","0.0.0.0:4343"],"EnableSSHKeysign":"yes","EscapeChar":"~","ExitOnForwardFailure":"yes","FingerprintHash":"sha256","ForwardAgent":"yes","ForwardX11":"yes","ForwardX11Timeout":42,"ForwardX11Trusted":"yes","GatewayPorts":"yes","GlobalKnownHostsFile":["/etc/ssh/ssh_known_hosts","/tmp/ssh_known_hosts"],"GSSAPIAuthentication":"no","GSSAPIClientIdentity":"moul","GSSAPIDelegateCredentials":"no","GSSAPIKeyExchange":"no","GSSAPIRenewalForcesRekey":"no","GSSAPIServerIdentity":"gssapi.example.com","GSSAPITrustDNS":"no","HashKnownHosts":"no","HostbasedAuthentication":"no","HostbasedKeyTypes":"*","HostKeyAlgorithms":["ecdsa-sha2-nistp256-cert-v01@openssh.com","test"],"HostKeyAlias":"z","IdentitiesOnly":"yes","IdentityFile":["~/.ssh/identity","~/.ssh/identity2"],"IgnoreUnknown":"testtest","IPQoS":["lowdelay","highdelay"],"KbdInteractiveAuthentication":"yes","KbdInteractiveDevices":["bsdauth","test"],"KexAlgorithms":["curve25519-sha256@libssh.org","test"],"KeychainIntegration":"yes","LocalCommand":"echo %h \u003e /tmp/logs","LocalForward":["0.0.0.0:1234","0.0.0.0:1235"],"LogLevel":"DEBUG3","MACs":["umac-64-etm@openssh.com,umac-128-etm@openssh.com","test"],"Match":"all","NoHostAuthenticationForLocalhost":"yes","NumberOfPasswordPrompts":"3","PasswordAuthentication":"yes","PermitLocalCommand":"yes","PKCS11Provider":"/a/b/c/pkcs11.so","Port":"22","PreferredAuthentications":"gssapi-with-mic,hostbased,publickey","Protocol":["2","3"],"ProxyJump":"proxy.host","ProxyUseFdpass":"no","PubkeyAuthentication":"yes","RekeyLimit":"default none","RemoteForward":["0.0.0.0:1234","0.0.0.0:1255"],"RequestTTY":"yes","RevokedHostKeys":"/a/revoked-keys","RhostsRSAAuthentication":"no","RSAAuthentication":"yes","SendEnv":["CUSTOM_*,TEST","TEST2"],"ServerAliveCountMax":3,"StreamLocalBindMask":"0177","StreamLocalBindUnlink":"no","StrictHostKeyChecking":"ask","TCPKeepAlive":"yes","Tunnel":"yes","TunnelDevice":"any:any","UpdateHostKeys":"ask","UseKeychain":"no","UsePrivilegedPort":"no","User":"moul","UserKnownHostsFile":["~/.ssh/known_hosts ~/.ssh/known_hosts2","/tmp/known_hosts"],"VerifyHostKeyDNS":"no","VisualHostKey":"yes","XAuthLocation":"xauth","HostName":"zzz.com","ProxyCommand":"nc %h %p"}},"templates":{"mmm":{"Port":"25","User":"mmmm","HostName":"5.5.5.5","Inherits":["tata"]}},"defaults":{"Port":"22","User":"root","Hooks":{}},"asshknownhostfile":"~/.ssh/assh_known_hosts"}`)
+		So(config.String(), ShouldEqual, `{"hosts":{"*.ddd":{"PasswordAuthentication":"yes","HostName":"1.3.5.7"},"empty":{},"nnn":{"Port":"26","Inherits":["mmm"]},"ooo1":{"Port":"23","Aliases":["ooo11","ooo12"]},"ooo2":{"Port":"24","Aliases":["ooo21","ooo22"]},"r(\\d+)":{"UseRegex":true,"RegexExpansion":"regex-$1.example.com"},"tata":{"Inherits":["tutu","titi","toto","tutu"]},"titi":{"Port":"23","User":"moul","HostName":"tata","ProxyCommand":"nc -v 4242","ControlMasterMkdir":"true","Comment":["Hello World"]},"tonton":{"ResolveNameservers":["a.com","1.2.3.4"],"Comment":["AAA","BBB"]},"toto":{"HostName":"1.2.3.4"},"toto[1-5]toto":{"User":"toto1"},"toto[7-9]toto":{"User":"toto2"},"toutou":{"RemoteCommand":"date \u003e\u003e /tmp/logs","ResolveCommand":"dig -t %h","Comment":["First line Second line Third line\n"]},"tutu":{"Inherits":["toto","tutu","*.ddd"],"Gateways":["titi","direct","1.2.3.4"]},"zzz":{"AddressFamily":"any","AskPassGUI":"yes","BatchMode":"no","CanonicalDomains":"42.am","CanonicalizeFallbackLocal":"no","CanonicalizeHostname":"yes","CanonicalizeMaxDots":"1","CanonicalizePermittedCNAMEs":"*.a.example.com:*.b.example.com:*.c.example.com","ChallengeResponseAuthentication":"yes","CheckHostIP":"yes","Cipher":"blowfish","Ciphers":["aes128-ctr,aes192-ctr","aes256-ctr"],"ClearAllForwardings":"yes","Compression":"yes","CompressionLevel":6,"ConnectionAttempts":"1","ConnectTimeout":10,"ControlMaster":"yes","ControlPath":"/tmp/%L-%l-%n-%p-%u-%r-%C-%h","ControlPersist":"yes","DynamicForward":["0.0.0.0:4242","0.0.0.0:4343"],"EnableSSHKeysign":"yes","EscapeChar":"~","ExitOnForwardFailure":"yes","FingerprintHash":"sha256","ForwardAgent":"yes","ForwardX11":"yes","ForwardX11Timeout":42,"ForwardX11Trusted":"yes","GatewayPorts":"yes","GlobalKnownHostsFile":["/etc/ssh/ssh_known_hosts","/tmp/ssh_known_hosts"],"GSSAPIAuthentication":"no","GSSAPIClientIdentity":"moul","GSSAPIDelegateCredentials":"no","GSSAPIKeyExchange":"no","GSSAPIRenewalForcesRekey":"no","GSSAPIServerIdentity":"gssapi.example.com","GSSAPITrustDNS":"no","HashKnownHosts":"no","HostbasedAuthentication":"no","HostbasedKeyTypes":"*","HostKeyAlgorithms":["ecdsa-sha2-nistp256-cert-v01@openssh.com","test"],"HostKeyAlias":"z","IdentitiesOnly":"yes","IdentityFile":["~/.ssh/identity","~/.ssh/identity2"],"IgnoreUnknown":"testtest","IPQoS":["lowdelay","highdelay"],"KbdInteractiveAuthentication":"yes","KbdInteractiveDevices":["bsdauth","test"],"KexAlgorithms":["curve25519-sha256@libssh.org","test"],"KeychainIntegration":"yes","LocalCommand":"echo %h \u003e /tmp/logs","LocalForward":["0.0.0.0:1234","0.0.0.0:1235"],"LogLevel":"DEBUG3","MACs":["umac-64-etm@openssh.com,umac-128-etm@openssh.com","test"],"Match":"all","NoHostAuthenticationForLocalhost":"yes","NumberOfPasswordPrompts":"3","PasswordAuthentication":"yes","PermitLocalCommand":"yes","PKCS11Provider":"/a/b/c/pkcs11.so","Port":"22","PreferredAuthentications":"gssapi-with-mic,hostbased,publickey","Protocol":["2","3"],"ProxyJump":"proxy.host","ProxyUseFdpass":"no","PubkeyAuthentication":"yes","RekeyLimit":"default none","RemoteForward":["0.0.0.0:1234","0.0.0.0:1255"],"RequestTTY":"yes","RevokedHostKeys":"/a/revoked-keys","RhostsRSAAuthentication":"no","RSAAuthentication":"yes","SendEnv":["CUSTOM_*,TEST","TEST2"],"ServerAliveCountMax":3,"StreamLocalBindMask":"0177","StreamLocalBindUnlink":"no","StrictHostKeyChecking":"ask","TCPKeepAlive":"yes","Tunnel":"yes","TunnelDevice":"any:any","UpdateHostKeys":"ask","UseKeychain":"no","UsePrivilegedPort":"no","User":"moul","UserKnownHostsFile":["~/.ssh/known_hosts ~/.ssh/known_hosts2","/tmp/known_hosts"],"VerifyHostKeyDNS":"no","VisualHostKey":"yes","XAuthLocation":"xauth","HostName":"zzz.com","ProxyCommand":"nc %h %p"}},"templates":{"mmm":{"Port":"25","User":"mmmm","HostName":"5.5.5.5","Inherits":["tata"]}},"defaults":{"Port":"22","User":"root","Hooks":{}},"asshknownhostfile":"~/.ssh/assh_known_hosts"}`)
 	})
 }
 
@@ -1351,6 +1382,7 @@ Host ooo21
 Host ooo22
   Port 24
   # AliasOf: ooo2
+
 
 Host tata
   PasswordAuthentication yes
@@ -1577,6 +1609,36 @@ Host *
 		output := strings.Join(strings.Split(buffer.String(), "\n")[3:], "\n")
 		So(output, ShouldEqual, expected)
 	})
+	Convey("Testing regexp hosts are not output to SSH Config but their matches are", t, func() {
+		config := New()
+		config.Hosts[`r(\d+)`] = &Host{
+			name:           `r(\d+)`,
+			UseRegex:       true,
+			RegexExpansion: "regex-$1.example.com",
+		}
+
+		config.applyMissingNames()
+
+		config.addKnownHost("r123")
+
+		var buffer bytes.Buffer
+		config.ASSHBinaryPath = "assh"
+		asshBinaryPath = "assh"
+		err := config.WriteSSHConfigTo(&buffer)
+		So(err, ShouldBeNil)
+		expected := `# more info: https://github.com/moul/assh
+
+# host-based configuration
+Host r123
+  # KnownHostOf: r(\d+)
+
+# global configuration
+Host *
+  ProxyCommand assh connect --port=%p %h
+`
+		output := strings.Join(strings.Split(buffer.String(), "\n")[3:], "\n")
+		So(output, ShouldEqual, expected)
+	})
 }
 
 func TestConfig_ValidateSummary(t *testing.T) {
@@ -1599,5 +1661,20 @@ func TestConfig_ValidateSummary(t *testing.T) {
 		config.Hosts["tata"].AddressFamily = "invalid data"
 		errs := config.Validate()
 		So(len(errs), ShouldEqual, 3)
+	})
+}
+
+func TestConfig_RegexMatch(t *testing.T) {
+	Convey("Testing host regex matching", t, FailureContinues, func() {
+		config := New()
+		config.Hosts[`r(\d+)`] = &Host{
+			name:           `r(\d+)`,
+			UseRegex:       true,
+			RegexExpansion: "regex-$1.foo.com",
+		}
+
+		h := config.GetHostSafe("r123")
+		So(h.HostName, ShouldEqual, "regex-123.foo.com")
+
 	})
 }

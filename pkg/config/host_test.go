@@ -294,3 +294,35 @@ func dummyHost() *Host {
 		ResolveCommand:     "",
 	}
 }
+
+func TestHost_RegexPrototype(t *testing.T) {
+	Convey("Testing host using regex is marked as dynamic", t, func() {
+		h := &Host{
+			UseRegex: true,
+		}
+		So(h.Prototype(), ShouldContainSubstring, "[dynamic]")
+
+	})
+}
+
+func TestHost_RegexExpansion(t *testing.T) {
+	Convey("Testing Host.ExpandString() with a regex expansion template", t, func() {
+		h := &Host{
+			name:           `r(\d+)`,
+			UseRegex:       true,
+			RegexExpansion: "regex-$1.foo.com",
+		}
+		So(h.ExpandString("r123", ""), ShouldEqual, "regex-123.foo.com")
+	})
+}
+
+func TestHost_RegexSearch(t *testing.T) {
+	Convey("Testing Host.Matches() to ensure that host using regex matches input", t, func() {
+		h := &Host{
+			name:           `r(\d+)`,
+			UseRegex:       true,
+			RegexExpansion: "regex-$1.foo.com",
+		}
+		So(h.Matches("r123"), ShouldBeTrue)
+	})
+}
